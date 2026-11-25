@@ -1916,6 +1916,12 @@ Status DBImpl::CompactFilesImpl(
 
   assert(is_snapshot_supported_ || snapshots_.empty());
   CompactionJobStats compaction_job_stats;
+  // Local fork: honor the public in-progress CompactFiles cancellation contract
+  // beyond the initial check. Job and executors must observe the same atomic;
+  // this synchronous call drains their work before the caller can destroy it.
+  const std::atomic<bool>& canceled = compact_options.canceled != nullptr
+                                          ? *compact_options.canceled
+                                          : kManualCompactionCanceledFalse_;
   CompactionJob compaction_job(
       job_context->job_id, c.get(), immutable_db_options_, mutable_db_options_,
       file_options_for_compaction_, versions_.get(), &shutting_down_,
@@ -1926,12 +1932,12 @@ Status DBImpl::CompactFilesImpl(
       c->mutable_cf_options().paranoid_file_checks,
       c->mutable_cf_options().report_bg_io_stats, dbname_,
       &compaction_job_stats, Env::Priority::USER, io_tracer_,
-      kManualCompactionCanceledFalse_, compaction_aborted_, db_id_,
+      canceled, compaction_aborted_, db_id_,
       db_session_id_, c->column_family_data()->GetFullHistoryTsLow(),
       c->trim_ts(), &blob_callback_, &bg_compaction_scheduled_,
       &bg_bottom_compaction_scheduled_, &num_running_remote_compactions_);
   ConfigureCompactionExecutors(&compaction_job, c->column_family_data(),
-                               kManualCompactionCanceledFalse_, false,
+                               canceled, false,
                                separate_remote_pool);
   c->SetSeparateRemoteCompactionPoolSelected(separate_remote_pool);
 
